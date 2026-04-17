@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>FocusFlow — Pomodoro Study Timer</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0f14;
+      --surface: #13161e;
+      --border: #1e2330;
+      --accent: #e8c97e;
+      --accent2: #7ec9e8;
+      --text: #e8e4dc;
+      --muted: #6b7280;
+      --danger: #e87e7e;
+      --green: #7ee8a2;
+      --r: 16px;
+    }
+
+    body {
+      font-family: 'DM Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background blobs */
+    body::before, body::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.07;
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::before {
+      width: 500px; height: 500px;
+      background: var(--accent);
+      top: -100px; left: -100px;
+    }
+    body::after {
+      width: 400px; height: 400px;
+      background: var(--accent2);
+      bottom: -80px; right: -80px;
+    }
+
+    .app {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      margin-bottom: 36px;
+      animation: fadeDown 0.6s ease both;
+    }
+    .header h1 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 2.4rem;
+      letter-spacing: -0.5px;
+      color: var(--text);
+    }
+    .header h1 span { color: var(--accent); font-style: italic; }
+    .header p {
+      color: var(--muted);
+      font-size: 0.78rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    /* Mode tabs */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 6px;
+      margin-bottom: 28px;
+      animation: fadeUp 0.6s 0.1s ease both;
+    }
+    .tab {
+      flex: 1;
+      padding: 8px 0;
+      border: none;
+      border-radius: 10px;
+      font-family: 'DM Mono', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      background: transparent;
+      color: var(--muted);
+      transition: all 0.2s;
+    }
+    .tab.active {
+      background: var(--accent);
+      color: #0d0f14;
+      font-weight: 500;
+    }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    /* Timer card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 40px 32px 32px;
+      text-align: center;
+      animation: fadeUp 0.6s 0.2s ease both;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 60%; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+
+    /* SVG ring */
+    .ring-wrap {
+      position: relative;
+      width: 220px;
+      height: 220px;
+      margin: 0 auto 28px;
+    }
+    .ring-wrap svg {
+      transform: rotate(-90deg);
+      width: 100%; height: 100%;
+    }
+    .ring-bg { fill: none; stroke: var(--border); stroke-width: 6; }
+    .ring-fg {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 6;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s linear, stroke 0.4s;
+    }
+    .ring-fg.break { stroke: var(--accent2); }
+    .ring-fg.long  { stroke: var(--green); }
+
+    .time-display {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .time {
+      font-family: 'DM Serif Display', serif;
+      font-size: 3.4rem;
+      letter-spacing: -2px;
+      line-height: 1;
+    }
+    .mode-label {
+      font-size: 0.65rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    /* Pulsing dot when running */
+    .pulse-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin: 2px auto 0;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .pulse-dot.active {
+      opacity: 1;
+      animation: pulse 1.2s ease infinite;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    .btn {
+      border: none;
+      cursor: pointer;
+      font-family: 'DM Mono', monospace;
+      transition: all 0.18s;
+    }
+    .btn-icon {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      background: var(--border);
+      color: var(--muted);
+      font-size: 1rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .btn-icon:hover { background: #2a2f3e; color: var(--text); }
+
+    .btn-main {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #0d0f14;
+      font-size: 1.5rem;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 0 rgba(232,201,126,0.4);
+    }
+    .btn-main:hover { transform: scale(1.06); }
+    .btn-main.running {
+      animation: ringPulse 2s ease infinite;
+    }
+
+    /* Session counter */
+    .sessions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .session-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.3s, transform 0.3s;
+    }
+    .session-dot.done { background: var(--accent); transform: scale(1.15); }
+    .sessions-label {
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    /* Settings */
+    .settings {
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .setting-item { text-align: center; }
+    .setting-item label {
+      display: block;
+      font-size: 0.62rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .setting-val {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.3rem;
+      min-width: 28px;
+      color: var(--text);
+    }
+    .btn-sm {
+      width: 22px; height: 22px;
+      border-radius: 6px;
+      background: var(--border);
+      color: var(--muted);
+      font-size: 0.8rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .btn-sm:hover { background: #2a2f3e; color: var(--text); }
+
+    /* Stats bar */
+    .stats {
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 14px 20px;
+      animation: fadeUp 0.6s 0.3s ease both;
+    }
+    .stat { text-align: center; }
+    .stat-val {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.4rem;
+      color: var(--accent);
+    }
+    .stat-label {
+      font-size: 0.62rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 32px; left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 24px;
+      font-size: 0.78rem;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      z-index: 100;
+      transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+      white-space: nowrap;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Animations */
+    @keyframes fadeDown {
+      from { opacity:0; transform:translateY(-16px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(16px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:0.3; transform:scale(0.6); }
+    }
+    @keyframes ringPulse {
+      0%   { box-shadow: 0 0 0 0 rgba(232,201,126,0.4); }
+      70%  { box-shadow: 0 0 0 14px rgba(232,201,126,0); }
+      100% { box-shadow: 0 0 0 0 rgba(232,201,126,0); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>Focus<span>Flow</span></h1>
+    <p>Pomodoro Study Timer</p>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchMode('focus')">Focus</button>
+    <button class="tab" onclick="switchMode('short')">Short Break</button>
+    <button class="tab" onclick="switchMode('long')">Long Break</button>
+  </div>
+
+  <div class="card">
+    <div class="ring-wrap">
+      <svg viewBox="0 0 220 220">
+        <circle class="ring-bg" cx="110" cy="110" r="100"/>
+        <circle class="ring-fg" id="ring" cx="110" cy="110" r="100"
+          stroke-dasharray="628.3" stroke-dashoffset="0"/>
+      </svg>
+      <div class="time-display">
+        <div class="time" id="timeDisplay">25:00</div>
+        <div class="mode-label" id="modeLabel">Focus Session</div>
+        <div class="pulse-dot" id="pulseDot"></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-icon" onclick="resetTimer()" title="Reset">↺</button>
+      <button class="btn btn-main" id="mainBtn" onclick="toggleTimer()">▶</button>
+      <button class="btn btn-icon" onclick="skipSession()" title="Skip">⏭</button>
+    </div>
+
+    <div class="sessions">
+      <span class="sessions-label">Sessions</span>
+      <div class="session-dot" id="s0"></div>
+      <div class="session-dot" id="s1"></div>
+      <div class="session-dot" id="s2"></div>
+      <div class="session-dot" id="s3"></div>
+    </div>
+
+    <div class="settings">
+      <div class="setting-item">
+        <label>Focus (min)</label>
+        <div class="setting-row">
+          <button class="btn btn-sm" onclick="adjust('focus',-1)">−</button>
+          <span class="setting-val" id="focusVal">25</span>
+          <button class="btn btn-sm" onclick="adjust('focus',+1)">+</button>
+        </div>
+      </div>
+      <div class="setting-item">
+        <label>Short Brk</label>
+        <div class="setting-row">
+          <button class="btn btn-sm" onclick="adjust('short',-1)">−</button>
+          <span class="setting-val" id="shortVal">5</span>
+          <button class="btn btn-sm" onclick="adjust('short',+1)">+</button>
+        </div>
+      </div>
+      <div class="setting-item">
+        <label>Long Brk</label>
+        <div class="setting-row">
+          <button class="btn btn-sm" onclick="adjust('long',-1)">−</button>
+          <span class="setting-val" id="longVal">15</span>
+          <button class="btn btn-sm" onclick="adjust('long',+1)">+</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-val" id="statFocus">0</div>
+      <div class="stat-label">Sessions</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val" id="statTime">0m</div>
+      <div class="stat-label">Focus Time</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val" id="statBreaks">0</div>
+      <div class="stat-label">Breaks</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const CIRC = 2 * Math.PI * 100; // 628.3
+
+  const settings = { focus: 25, short: 5, long: 15 };
+  const labels   = { focus: 'Focus Session', short: 'Short Break', long: 'Long Break' };
+
+  let mode       = 'focus';
+  let totalSecs  = settings.focus * 60;
+  let remaining  = totalSecs;
+  let running    = false;
+  let interval   = null;
+  let sessionsDone = 0;
+  let totalFocusMin = 0;
+  let totalBreaks   = 0;
+
+  const ring      = document.getElementById('ring');
+  const timeEl    = document.getElementById('timeDisplay');
+  const labelEl   = document.getElementById('modeLabel');
+  const mainBtn   = document.getElementById('mainBtn');
+  const pulseDot  = document.getElementById('pulseDot');
+  const toastEl   = document.getElementById('toast');
+
+  function fmt(s) {
+    const m = Math.floor(s / 60).toString().padStart(2,'0');
+    const sec = (s % 60).toString().padStart(2,'0');
+    return `${m}:${sec}`;
+  }
+
+  function updateRing() {
+    const pct = remaining / totalSecs;
+    ring.style.strokeDashoffset = CIRC * (1 - pct);
+    ring.className = 'ring-fg' + (mode === 'short' ? ' break' : mode === 'long' ? ' long' : '');
+  }
+
+  function updateDisplay() {
+    timeEl.textContent = fmt(remaining);
+    labelEl.textContent = labels[mode];
+    document.title = `${fmt(remaining)} — FocusFlow`;
+    updateRing();
+  }
+
+  function toggleTimer() {
+    if (running) {
+      clearInterval(interval);
+      running = false;
+      mainBtn.textContent = '▶';
+      mainBtn.classList.remove('running');
+      pulseDot.classList.remove('active');
+    } else {
+      running = true;
+      mainBtn.textContent = '⏸';
+      mainBtn.classList.add('running');
+      pulseDot.classList.add('active');
+      interval = setInterval(tick, 1000);
+    }
+  }
+
+  function tick() {
+    if (remaining <= 0) {
+      clearInterval(interval);
+      running = false;
+      onComplete();
+      return;
+    }
+    remaining--;
+    updateDisplay();
+  }
+
+  function onComplete() {
+    mainBtn.textContent = '▶';
+    mainBtn.classList.remove('running');
+    pulseDot.classList.remove('active');
+
+    if (mode === 'focus') {
+      sessionsDone++;
+      totalFocusMin += settings.focus;
+      updateSessionDots();
+      document.getElementById('statFocus').textContent = sessionsDone;
+      document.getElementById('statTime').textContent = totalFocusMin + 'm';
+      showToast('🎉 Focus session complete! Time for a break.');
+      const nextMode = sessionsDone % 4 === 0 ? 'long' : 'short';
+      setTimeout(() => switchMode(nextMode), 1200);
+    } else {
+      totalBreaks++;
+      document.getElementById('statBreaks').textContent = totalBreaks;
+      showToast('✨ Break over. Ready to focus?');
+      setTimeout(() => switchMode('focus'), 1200);
+    }
+  }
+
+  function resetTimer() {
+    clearInterval(interval);
+    running = false;
+    remaining = totalSecs;
+    mainBtn.textContent = '▶';
+    mainBtn.classList.remove('running');
+    pulseDot.classList.remove('active');
+    updateDisplay();
+  }
+
+  function skipSession() {
+    clearInterval(interval);
+    running = false;
+    remaining = 0;
+    onComplete();
+  }
+
+  function switchMode(m) {
+    mode = m;
+    totalSecs = settings[m] * 60;
+    remaining = totalSecs;
+    clearInterval(interval);
+    running = false;
+    mainBtn.textContent = '▶';
+    mainBtn.classList.remove('running');
+    pulseDot.classList.remove('active');
+    document.querySelectorAll('.tab').forEach((t,i) => {
+      t.classList.toggle('active', ['focus','short','long'][i] === m);
+    });
+    updateDisplay();
+  }
+
+  function updateSessionDots() {
+    for (let i = 0; i < 4; i++) {
+      document.getElementById('s'+i).classList.toggle('done', i < sessionsDone % 4 || (sessionsDone % 4 === 0 && sessionsDone > 0 && i < 4));
+    }
+  }
+
+  function adjust(key, delta) {
+    const min = key === 'focus' ? 5 : 1;
+    const max = key === 'focus' ? 90 : 30;
+    settings[key] = Math.min(max, Math.max(min, settings[key] + delta));
+    document.getElementById(key + 'Val').textContent = settings[key];
+    if (mode === key) {
+      totalSecs = settings[key] * 60;
+      remaining = totalSecs;
+      clearInterval(interval);
+      running = false;
+      mainBtn.textContent = '▶';
+      mainBtn.classList.remove('running');
+      pulseDot.classList.remove('active');
+      updateDisplay();
+    }
+  }
+
+  let toastTimer;
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3000);
+  }
+
+  // Init
+  updateDisplay();
+</script>
+</body>
+</html>
